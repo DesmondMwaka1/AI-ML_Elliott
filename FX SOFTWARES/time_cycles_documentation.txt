@@ -1,0 +1,59 @@
+﻿That's an excellent clarification! Since the tool you are using is Pine Script, and your question is about the README documentation, I will update the README content to specifically address Canvas as a conceptual, alternative platform where this logic could be applied, contrasting it with the Pine Script environment.
+Here is the updated README content focusing on the logic and design principles.
+________________
+
+
+📈 Forex Time Cycles (Factorial) Indicator
+
+
+This Pine Script indicator visualizes a time-based market structure by dividing the main trading session into a series of nested, fractal cycles anchored to the New York (NY) trading hours.
+
+
+🎯 Core Logic: Fractal Time Cycles
+
+
+The foundation of this indicator is the concept that the market's activity follows self-similar cycles based on a division factor of 3. All cycles are measured in minutes (m) and begin at 2:30 AM New York time, ending at 4:00 PM NY time.
+
+
+Cycle Hierarchy:
+
+Cycle Name  Duration  Structure(Factor of 3)                  Total Cycles     Purpose
+270m        4.5 hours 3 major cycles per day                  3                Defines the highest-level daily phases.
+90m         1.5 hours 3 cycles nested within each 270m cycle. 9                Maps the major session shifts (e.g., London Open, NY Open).
+30m         30minutes 3 cycles nested within each 90m cycle.  27               Provides granular, high-frequency context.
+	
+
+💻 Pine Script Implementation Details
+
+
+This code uses Pine Script's built-in drawing primitives (box.new, line.new, label.new) to achieve reliable visualization across historical chart data.
+
+
+Robust Drawing Mechanism (draw_session)
+
+
+To prevent cycles from failing to draw on historical bars when the chart is reloaded or scrolled, the draw_session function implements a stable, two-part system:
+1. Dynamic Update: While a session is active, a persistent var box session_box object is used. On every single bar, the box's right edge, high, and low are actively updated (box.set_right, box.set_top, box.set_bottom). This ensures the box always represents the current range up to the most recent bar.
+2. Finalization: When the time crosses the session's end boundary, the function executes the final drawing of the fixed High/Low lines and the session label, and then resets the session_box and range variables (na) for the next cycle.
+
+
+Conceptual Translation for Canvas/Web Visualization
+
+
+If this logic were to be translated to a JavaScript/HTML Canvas environment, the implementation would follow the same principle but with different tools:
+* Time-to-Pixel Mapping: Instead of using bar_index as the X-coordinate, the script would need a function (mapDataToCanvas) to translate the NY timestamp of the cycle boundary into a pixel X-coordinate based on the visible chart range.
+* Price-to-Pixel Mapping: The High, Low, and Equilibrium price levels would be translated into pixel Y-coordinates based on the canvas height and the visible price range.
+* Drawing Primitives: The box.new command would be replaced with standard Canvas methods:
+   * ctx.fillRect() for the cycle box background.
+   * ctx.strokeRect() for the border lines.
+   * ctx.beginPath() and ctx.lineTo() for the Equilibrium line.
+
+
+🛠️ Customization (User Inputs)
+
+
+You can customize the indicator's appearance directly from the settings panel:
+* Cycles & Colors: Toggle visibility and set the color for the 270m, 90m, and 30m cycle groups.
+* High/Low Lines: Toggle the horizontal lines marking the high and low of the session box.
+* Equilibrium Levels: Toggle the dotted line showing the mid-point (50%) of the session box range.
+* Labels: Toggle the display of the cycle name and time range above the boxes.

@@ -1,0 +1,256 @@
+//@version=5
+indicator(title="Forex Time Cycles", shorttitle="Time Cycles Pro", overlay=true)
+
+// --- User Inputs Section ---
+bool show_labels = input.bool(false, title="Show Cycle Labels") 
+bool draw_session_background = input.bool(true, title="Show Cycle Background Color")
+int cycle_line_width = input.int(2, title="Cycle Line Thickness", minval=1, maxval=4)
+
+// DEBUGGING: Green plot at the top. 
+//bool debug_30m_cycles = input.bool(**false**, title="Show 30M Cycle Debug Dots (GREEN - Global)") 
+
+// --- FRACTAL COLOR DEFINITIONS ---
+color COLOR_INDEX_1 = input.color(color.new(color.blue, 90), title="Index 1 Color (1st Cycle)")
+color COLOR_INDEX_2 = input.color(color.new(color.red, 90), title="Index 2 Color (2nd Cycle)")
+color COLOR_INDEX_3 = input.color(color.new(color.green, 90), title="Index 3 Color (3rd Cycle)")
+
+// --- Cycle Visibility Inputs (Only 270m, 90m, 30m are user-configurable) ---
+bool show_270m_cycles = input.bool(false, title="Show 270M Cycles") 
+bool show_90m_cycles = input.bool(false, title="Show 90M Cycles")   
+bool show_30m_cycles = input.bool(true, title="Show 30M Cycles")
+
+// Hidden cycle variables (Code remains, but user cannot toggle them now)
+var bool show_10m_cycles = false 
+var bool show_3m_cycles = false 
+
+// NOTE: These inputs no longer draw lines, but are kept for future flexibility.
+bool show_cycle_lines = input.bool(true, title="Show Cycle High/Low Lines")
+bool show_eq_levels = input.bool(true, title="Show Equilibrium Levels")
+
+// --- Timezone and Helper Functions ---
+string NY_TIMEZONE = "America/New_York"
+
+// Helper function to get the color based on the cycle index
+get_cycle_color(cycle_index) =>
+    int actual_index = cycle_index % 3 == 0 ? 3 : cycle_index % 3
+    color final_color = color.black 
+    
+    if actual_index == 3
+        final_color := COLOR_INDEX_3
+    else if actual_index == 2
+        final_color := COLOR_INDEX_2
+    else
+        final_color := COLOR_INDEX_1
+        
+    final_color
+
+// A helper function to check if the current bar is within a specific time range AND is on today's date.
+in_session(startHour, startMin, endHour, endMin) =>
+    // 1. Get Today's Date Components (NY Time)
+    int today_year = year(timenow, NY_TIMEZONE)
+    int today_month = month(timenow, NY_TIMEZONE)
+    int today_day = dayofmonth(timenow, NY_TIMEZONE)
+    
+    // 2. Check if the current bar is on today's calendar date
+    bool is_bar_on_today = year == today_year and month == today_month and dayofmonth == today_day
+
+    // 3. Calculate the session start and end times *for the current bar's date*
+    int sessionStart = timestamp(NY_TIMEZONE, year, month, dayofmonth, startHour, startMin, 0)
+    int sessionEnd = timestamp(NY_TIMEZONE, year, month, dayofmonth, endHour, endMin, 0)
+    
+    is_overnight = startHour > endHour or (startHour == endHour and startMin > endMin)
+    if is_overnight
+        // The timestamp function handles date rollovers automatically.
+        sessionEnd := timestamp(NY_TIMEZONE, year, month, dayofmonth + 1, endHour, endMin, 0)
+    
+    // 4. Final check: Bar must be within the time window AND the bar's date must be today's date
+    time_in_window = time >= sessionStart and time < sessionEnd
+    
+    is_bar_on_today and time_in_window
+
+// --- GLOBAL ARRAY DECLARATIONS (LIMIT INCREASED) ---
+MAX_CYCLES = 1000 // To safely hold the hidden 10m/3m cycle data
+var array<float> high_arr = array.new_float(MAX_CYCLES, na)
+var array<float> low_arr = array.new_float(MAX_CYCLES, na)
+var array<int> start_bar_arr = array.new_int(MAX_CYCLES, na)
+var array<box> box_arr = array.new_box(MAX_CYCLES) 
+
+// --- DRAWING FUNCTION ---
+draw_session(start_hour, start_min, end_hour, end_min, bg_color, cycle_name, cycle_array_index) =>
+    // Retrieve persistent data for this specific cycle from the global arrays
+    float session_high = array.get(high_arr, cycle_array_index)
+    float session_low = array.get(low_arr, cycle_array_index)
+    int session_start_bar = array.get(start_bar_arr, cycle_array_index)
+    box session_box = array.get(box_arr, cycle_array_index)
+    
+    bool in_this_session = in_session(start_hour, start_min, end_hour, end_min)
+    bool session_was_active = in_this_session[1] and not in_this_session
+    color box_color = draw_session_background ? bg_color : color.new(bg_color, 100)
+    
+    // --- 1. Session Start/Running Logic ---
+    if in_this_session
+        // Start a new session ONLY if session_box is na 
+        if na(session_box) 
+            session_high := high
+            session_low := low
+            session_start_bar := bar_index
+            // Create the box immediately on the first bar of the session
+            session_box := box.new(session_start_bar, session_high, bar_index, session_low, 
+                                   bgcolor=box_color, border_width=0, text="")
+        else
+            session_high := math.max(session_high, high)
+            session_low := math.min(session_low, low)
+            
+            box.set_right(session_box, bar_index)
+            box.set_top(session_box, session_high)
+            box.set_bottom(session_box, session_low)
+            box.set_bgcolor(session_box, box_color) 
+            
+        // Save the updated values back to the global arrays
+        array.set(high_arr, cycle_array_index, session_high)
+        array.set(low_arr, cycle_array_index, session_low)
+        array.set(start_bar_arr, cycle_array_index, session_start_bar)
+        array.set(box_arr, cycle_array_index, session_box)
+        
+    // --- 2. Session End/Final Draw Logic ---
+    if session_was_active 
+        end_bar = bar_index - 1 
+        
+        // Final Lines/Labels are drawn here (All lines commented out)
+        if show_cycle_lines and not na(session_start_bar) 
+            if show_eq_levels
+                true 
+        
+        if show_labels
+            string ampm_start = start_hour >= 12 ? "PM" : "AM"
+            string ampm_end = end_hour >= 12 ? "PM" : "AM"
+            string start_time_str = str.tostring(start_hour % 12 == 0 ? 12 : start_hour % 12) + ":" + str.tostring(start_min, "00") + ampm_start
+            string end_time_str = str.tostring(end_hour % 12 == 0 ? 12 : end_hour % 12) + ":" + str.tostring(end_min, "00") + ampm_end
+            string label_text = cycle_name + "\n" + start_time_str + "-" + end_time_str 
+            
+            label.new(x=math.floor((session_start_bar + end_bar) / 2), y=session_high, text=label_text, style=label.style_label_down, size=size.small, color=color.new(bg_color, 25))
+
+        // Reset all persistent values for this cycle to na/empty 
+        array.set(high_arr, cycle_array_index, na)
+        array.set(low_arr, cycle_array_index, na)
+        array.set(start_bar_arr, cycle_array_index, na)
+        array.set(box_arr, cycle_array_index, na)
+
+// --- Main Execution Logic ---
+START_H = 2
+START_M = 30
+END_H = 16
+END_M = 0
+
+// --- 270-Minute and 90-Minute Cycles (Indices 10-28) ---
+if show_270m_cycles
+    draw_session(2, 30, 7, 0, get_cycle_color(1), "270m-1", 10) 
+    draw_session(7, 0, 11, 30, get_cycle_color(2), "270m-2", 11)
+    draw_session(11, 30, 16, 0, get_cycle_color(3), "270m-3", 12)
+
+if show_90m_cycles
+    draw_session(2, 30, 4, 0, get_cycle_color(1), "90m-1", 20)
+    draw_session(4, 0, 5, 30, get_cycle_color(2), "90m-2", 21)
+    draw_session(5, 30, 7, 0, get_cycle_color(3), "90m-3", 22)
+    draw_session(7, 0, 8, 30, get_cycle_color(1), "90m-4", 23)
+    draw_session(8, 30, 10, 0, get_cycle_color(2), "90m-5", 24)
+    draw_session(10, 0, 11, 30, get_cycle_color(3), "90m-6", 25)
+    draw_session(11, 30, 13, 0, get_cycle_color(1), "90m-7", 26)
+    draw_session(13, 0, 14, 30, get_cycle_color(2), "90m-8", 27)
+    draw_session(14, 30, 16, 0, get_cycle_color(3), "90m-9", 28)
+
+// ------------------------------------
+// 30-Minute Cycles (Indices 30-58)
+// ------------------------------------
+var bool is_30m_active = false
+int next_available_index = 30 
+if show_30m_cycles
+    int start_minutes_of_day = START_H * 60 + START_M
+    int end_minutes_of_day = END_H * 60 + END_M
+    int cycle_duration = 30
+    int cycle_index = 1 
+
+    // Loop through all 30-minute intervals from 2:30 AM to 4:00 PM
+    for current_m = start_minutes_of_day to end_minutes_of_day - cycle_duration by cycle_duration
+        int start_h = current_m / 60
+        int start_m = current_m % 60
+        
+        int end_m_total = current_m + cycle_duration
+        int end_h = end_m_total / 60
+        int end_m = end_m_total % 60
+        
+        color cycle_color = get_cycle_color(cycle_index)
+        
+        draw_session(start_h, start_m, end_h, end_m, cycle_color, "30m-" + str.tostring(cycle_index), next_available_index)
+        
+        is_30m_active := true 
+        
+        // Update indices
+        cycle_index := cycle_index % 3 + 1
+        next_available_index := next_available_index + 1 
+        
+// ------------------------------------
+// 10-Minute Cycles (Indices 60-147)
+// ------------------------------------
+var bool is_10m_active = false
+if show_10m_cycles 
+    int start_index_10m = 60 
+    int start_minutes_of_day = START_H * 60 + START_M
+    int end_minutes_of_day = END_H * 60 + END_M
+    int cycle_duration = 10
+    int cycle_index = 1 
+    int cycle_array_index = start_index_10m
+
+    // Loop through all 10-minute intervals from 2:30 AM to 4:00 PM
+    for current_m = start_minutes_of_day to end_minutes_of_day - cycle_duration by cycle_duration
+        int start_h = current_m / 60
+        int start_m = current_m % 60
+        
+        int end_m_total = current_m + cycle_duration
+        int end_h = end_m_total / 60
+        int end_m = end_m_total % 60
+        
+        color cycle_color = get_cycle_color(cycle_index)
+        
+        draw_session(start_h, start_m, end_h, end_m, cycle_color, "10m-" + str.tostring(cycle_index), cycle_array_index)
+        
+        is_10m_active := true 
+        
+        // Update indices
+        cycle_index := cycle_index % 3 + 1
+        cycle_array_index := cycle_array_index + 1 
+
+// ------------------------------------
+// 3-Minute Cycles (Indices 150-447)
+// ------------------------------------
+var bool is_3m_active = false
+if show_3m_cycles 
+    int start_index_3m = 150 
+    int start_minutes_of_day = START_H * 60 + START_M
+    int end_minutes_of_day = END_H * 60 + END_M
+    int cycle_duration = 3
+    int cycle_index = 1 
+    int cycle_array_index = start_index_3m
+
+    // Loop through all 3-minute intervals from 2:30 AM to 4:00 PM
+    for current_m = start_minutes_of_day to end_minutes_of_day - cycle_duration by cycle_duration
+        int start_h = current_m / 60
+        int start_m = current_m % 60
+        
+        int end_m_total = current_m + cycle_duration
+        int end_h = end_m_total / 60
+        int end_m = end_m_total % 60
+        
+        color cycle_color = get_cycle_color(cycle_index)
+        
+        draw_session(start_h, start_m, end_h, end_m, cycle_color, "3m-" + str.tostring(cycle_index), cycle_array_index)
+        
+        is_3m_active := true 
+        
+        // Update indices
+        cycle_index := cycle_index % 3 + 1
+        cycle_array_index := cycle_array_index + 1 
+// ------------------------------------
+
+// --- DEBUGGING OUTPUT (Global) ---
+// plotchar(debug_30m_cycles and (is_30m_active or is_10m_active or is_3m_active or show_90m_cycles or show_270m_cycles), title="Cycles Active (Global)", char='•', location=location.top, color=color.green, size=size.small)

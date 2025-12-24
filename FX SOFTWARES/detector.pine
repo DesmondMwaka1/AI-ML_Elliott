@@ -1,0 +1,228 @@
+//@version=5
+indicator("Last 5 SMT Divergences per Cycle (Fixed)", overlay=true, max_lines_count=500, max_labels_count=500)
+
+//------------------------------------
+// INPUTS & CONSTANTS
+//------------------------------------
+nasdaqSymbol = input.symbol("CME_MINI:NQ1!", "Nasdaq Symbol (e.g., NQ1!)")
+spxSymbol = input.symbol("CME_MINI:ES1!", "S&P 500 Symbol (e.g., ES1!)")
+
+// Maximum number of SMT occurrences to plot per type/cycle
+MAX_PLOTS = 5
+MAX_ARRAY_SIZE = MAX_PLOTS * 8 // 5 events * 8 data points per event = 40
+// Define a safe historical limit: reduced to 3000 to be conservative against dynamic buffer limits (like 3472)
+HISTORICAL_BAR_LIMIT = 3000 
+
+//------------------------------------
+// FUNCTION: Cycle High/Low Generator
+//------------------------------------
+getCycleHL(tf) =>
+    nasdaq_h = request.security(nasdaqSymbol, tf, high)
+    nasdaq_l = request.security(nasdaqSymbol, tf, low)
+    spx_h = request.security(spxSymbol, tf, high)
+    spx_l = request.security(spxSymbol, tf, low)
+    [nasdaq_h, nasdaq_l, spx_h, spx_l]
+
+//------------------------------------
+// GET CYCLE EXTREMES
+//------------------------------------
+[nasH_90, nasL_90, spxH_90, spxL_90] = getCycleHL("90")
+[nasH_30, nasL_30, spxH_30, spxL_30] = getCycleHL("30")
+[nasH_10, nasL_10, spxH_10, spxL_10] = getCycleHL("10")
+[nasH_3, nasL_3, spxH_3, spxL_3] = getCycleHL("3")
+
+//------------------------------------
+// SMT LOGIC (Divergence Check)
+//------------------------------------
+isSMTHigh(nasPrevH, spxPrevH, nasNowH, spxNowH) =>
+    (nasNowH > nasPrevH and spxNowH < spxPrevH) or (spxNowH > spxPrevH and nasNowH < nasPrevH)
+
+isSMTLow(nasPrevL, spxPrevL, nasNowL, spxNowL) =>
+    (nasNowL < nasPrevL and spxNowL > spxPrevL) or (nasNowL < spxPrevL and nasNowL > nasPrevL)
+
+//------------------------------------
+// SMT CONDITIONS
+//------------------------------------
+isSMT90_H = isSMTHigh(nasH_90[1], spxH_90[1], nasH_90, spxH_90) and ta.change(nasH_90)
+isSMT90_L = isSMTLow (nasL_90[1], spxL_90[1], nasL_90, spxL_90) and ta.change(nasL_90)
+
+isSMT30_H = isSMTHigh(nasH_30[1], spxH_30[1], nasH_30, spxH_30) and ta.change(nasH_30)
+isSMT30_L = isSMTLow (nasL_30[1], spxL_30[1], nasL_30, spxL_30) and ta.change(nasL_30)
+
+isSMT10_H = isSMTHigh(nasH_10[1], spxH_10[1], nasH_10, spxH_10) and ta.change(nasH_10)
+isSMT10_L = isSMTLow (nasL_10[1], spxL_10[1], nasL_10, spxL_10) and ta.change(nasL_10)
+
+isSMT3_H = isSMTHigh(nasH_3[1], spxH_3[1], nasH_3, spxH_3) and ta.change(nasH_3)
+isSMT3_L = isSMTLow (nasL_3[1], spxL_3[1], nasL_3, spxL_3) and ta.change(nasL_3)
+
+//------------------------------------
+// DATA STORAGE ARRAYS 
+//------------------------------------
+var data_90h = array.new_float(0)
+var data_90l = array.new_float(0)
+var data_30h = array.new_float(0)
+var data_30l = array.new_float(0)
+var data_10h = array.new_float(0)
+var data_10l = array.new_float(0)
+var data_3h  = array.new_float(0)
+var data_3l  = array.new_float(0)
+
+// Function to store a new SMT event data using array.unshift and array.pop
+store_smt_data(data_array, prev_bar_nas, prev_price_nas, curr_bar_nas, curr_price_nas, prev_price_spx, curr_price_spx) =>
+    
+    // Add new data (8 unshifts)
+    array.unshift(data_array, curr_price_spx)
+    array.unshift(data_array, float(curr_bar_nas))
+    array.unshift(data_array, prev_price_spx)
+    array.unshift(data_array, float(prev_bar_nas))
+    
+    array.unshift(data_array, curr_price_nas)
+    array.unshift(data_array, float(curr_bar_nas))
+    array.unshift(data_array, prev_price_nas)
+    array.unshift(data_array, float(prev_bar_nas))
+
+    // Trim old data: Ensure size does not exceed MAX_ARRAY_SIZE
+    while array.size(data_array) > MAX_ARRAY_SIZE
+        array.pop(data_array)
+
+// Function to update the persistent arrays when an SMT is confirmed
+update_arrays(data_array, is_smt, nas_prev, spx_prev, nas_now, spx_now) =>
+    if barstate.isconfirmed and is_smt
+        store_smt_data(data_array, bar_index[1], nas_prev, bar_index, nas_now, spx_prev, spx_now)
+    
+//------------------------------------
+// EXECUTION: UPDATING ARRAYS (using dedicated arrays)
+//------------------------------------
+
+// 90m SMTs
+update_arrays(data_90h, isSMT90_H, nasH_90[1], spxH_90[1], nasH_90, spxH_90)
+update_arrays(data_90l, isSMT90_L, nasL_90[1], spxL_90[1], nasL_90, spxL_90)
+
+// 30m SMTs
+update_arrays(data_30h, isSMT30_H, nasH_30[1], spxH_30[1], nasH_30, spxH_30)
+update_arrays(data_30l, isSMT30_L, nasL_30[1], spxL_30[1], nasL_30, spxL_30)
+
+// 10m SMTs
+update_arrays(data_10h, isSMT10_H, nasH_10[1], spxH_10[1], nasH_10, spxH_10)
+update_arrays(data_10l, isSMT10_L, nasL_10[1], spxL_10[1], nasL_10, spxL_10)
+
+// 3m SMTs
+update_arrays(data_3h, isSMT3_H, nasH_3[1], spxH_3[1], nasH_3, spxH_3)
+update_arrays(data_3l, isSMT3_L, nasL_3[1], spxL_3[1], nasL_3, spxL_3)
+
+//------------------------------------
+// FUNCTION: DRAWING THE LAST 5 SMT OCCURRENCES
+//------------------------------------
+
+// Arrays to hold persistent drawing objects (cleared on every bar)
+var lines_to_delete = array.new_line(0)
+var labels_to_delete = array.new_label(0)
+
+// Clear all drawing objects from the previous bar (Only runs on the last bar)
+if barstate.islast
+    // Delete existing objects
+    if array.size(lines_to_delete) > 0
+        for i = 0 to array.size(lines_to_delete) - 1
+            line.delete(array.get(lines_to_delete, i))
+    
+    if array.size(labels_to_delete) > 0
+        for i = 0 to array.size(labels_to_delete) - 1
+            label.delete(array.get(labels_to_delete, i))
+            
+    // Clear the arrays for the new drawing cycle
+    array.clear(lines_to_delete)
+    array.clear(labels_to_delete)
+
+
+// Function to iterate over the stored data and draw lines/labels
+draw_last_n_smts(data_arr, tf_str, color_h, color_l) =>
+    
+    max_index = array.size(data_arr)
+    
+    i = 0
+    while i < max_index
+        
+        // Retrieve data points 
+        nas_prev_bar   = array.get(data_arr, i + 0)
+        nas_prev_price = array.get(data_arr, i + 1)
+        nas_curr_bar   = array.get(data_arr, i + 2)
+        nas_curr_price = array.get(data_arr, i + 3)
+        spx_prev_price = array.get(data_arr, i + 5)
+        spx_curr_price = array.get(data_arr, i + 7)
+        
+        // FIX: Check if the historical bar index is within the accessible buffer range.
+        // We only attempt to draw if we are on the last bar AND the event is within the conservative limit.
+        if barstate.islast and not na(nas_prev_bar) and (bar_index - nas_prev_bar < HISTORICAL_BAR_LIMIT)
+            
+            // Determine SMT type (High or Low) and choose color using direct string comparison
+            is_high_smt = tf_str == "90m H" or tf_str == "30m H" or tf_str == "10m H" or tf_str == "3m H"
+            line_color = is_high_smt ? color.new(color_h, 0) : color.new(color_l, 0)
+            
+            // Determine label placement
+            label_y_loc = is_high_smt ? yloc.abovebar : yloc.belowbar
+            label_style = is_high_smt ? label.style_label_down : label.style_label_up
+            
+            // --- Draw Nasdaq Line (Solid) ---
+            nasLine = line.new(
+                 int(nas_prev_bar), nas_prev_price, 
+                 int(nas_curr_bar), nas_curr_price, 
+                 xloc.bar_index, extend.none, line_color, line.style_solid, 2
+             )
+            array.push(lines_to_delete, nasLine) // Line 166
+
+            // --- Draw S&P 500 Line (Dotted) ---
+            spxLine = line.new(
+                 int(nas_prev_bar), spx_prev_price, 
+                 int(nas_curr_bar), spx_curr_price, 
+                 xloc.bar_index, extend.none, line_color, line.style_dotted, 2
+             )
+            array.push(lines_to_delete, spxLine)
+             
+            // --- Draw Label ---
+            label_text = tf_str // Displays the specific SMT name (e.g., "90m H")
+            
+            label_bar_index = int(nas_prev_bar) + math.round((int(nas_curr_bar) - int(nas_prev_bar)) / 2)
+            
+            smtLabel = label.new(
+                 label_bar_index, 
+                 close, 
+                 label_text, 
+                 xloc=xloc.bar_index, 
+                 yloc=label_y_loc, 
+                 color=line_color, 
+                 textcolor=color.white,
+                 size=size.small, 
+                 style=label_style
+             )
+            array.push(labels_to_delete, smtLabel)
+        
+        i := i + 8 // Move to the next event slot
+
+//------------------------------------
+// EXECUTION: DRAW LAST 5 SMTs FOR EACH CYCLE (Only runs on the last bar)
+//------------------------------------
+
+if barstate.islast
+    // 90m SMTs (High: Red, Low: Green)
+    draw_last_n_smts(data_90h, "90m H", color.red, color.green) 
+    draw_last_n_smts(data_90l, "90m L", color.red, color.green) 
+
+    // 30m SMTs (High: Orange, Low: Teal)
+    draw_last_n_smts(data_30h, "30m H", color.orange, color.teal) 
+    draw_last_n_smts(data_30l, "30m L", color.orange, color.teal) 
+
+    // 10m SMTs (High: Yellow, Low: Lime)
+    draw_last_n_smts(data_10h, "10m H", color.yellow, color.lime) 
+    draw_last_n_smts(data_10l, "10m L", color.yellow, color.lime) 
+
+    // 3m SMTs (High: Purple, Low: Fuchsia)
+    draw_last_n_smts(data_3h, "3m H", color.purple, color.fuchsia) 
+    draw_last_n_smts(data_3l, "3m L", color.purple, color.fuchsia) 
+
+//------------------------------------
+// ALERTS (Unchanged)
+//------------------------------------
+alertcondition(isSMT90_H or isSMT90_L, "90m SMT Alert", "SMT detected (90m)")
+alertcondition(isSMT30_H or isSMT30_L, "30m SMT Alert", "SMT detected (30m)")
+alertcondition(isSMT10_H or isSMT10_L, "10m SMT Alert", "SMT detected (10m)")
+alertcondition(isSMT3_H or isSMT3_L, "3m SMT Alert", "SMT detected (3m)")

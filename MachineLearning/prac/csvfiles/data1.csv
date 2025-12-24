@@ -1,0 +1,6 @@
+"ID","degrees(C)","humidity(%)","wind(KM/H)","is_rain"
+1,23,5,14,True
+2,30,10,17,True
+3,15,3,12,False
+4,20,12,5,False
+5,26,57,23,True
